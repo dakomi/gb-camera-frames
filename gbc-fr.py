@@ -1,27 +1,33 @@
 import os
 import argparse
 import binascii
+import subprocess
 from img2gb import GBTileset
 from PIL import Image
 
 from argparse import RawTextHelpFormatter
 from argparse import RawDescriptionHelpFormatter
 
-parser = argparse.ArgumentParser(description='Tool to modify standard photo frames in Game Boy Camera rom. Inject mode is the default mode and can be used to insert an image file (.png, .bmp) or tileset (.bin). An alternative copy mode can be enabled to transfer frame data from one rom to another.', formatter_class=RawTextHelpFormatter)
+parser = argparse.ArgumentParser(description='Tool to modify standard photo frames in Game Boy Camera rom. Inject mode is the default and can be used to insert an image file (.png, .bmp) or tileset (.bin). An alternative copy mode can be enabled to transfer frame data from one rom to another. A new export mode can extract a frame from a rom and save it as a PNG image.', formatter_class=RawTextHelpFormatter)
 
 inject_group = parser.add_argument_group(title='inject mode options')
 copy_group = parser.add_argument_group(title='copy mode options')
+export_group = parser.add_argument_group(title='export mode options')
 global_group = parser.add_argument_group(title='required options')
 
 inject_group.add_argument('--source-image', '-si', metavar='FILE', help='path to source image file for inject mode (.png, .bmp or already formatted tile data .bin)\n\n')
 
 copy_group.add_argument('--copy-mode', '-c', action='store_true', help='enables copy mode to rip frames from another camera rom .gb file\n')
-copy_group.add_argument('--frame-type', '-ft', choices=['standard', 'wild'], default='standard', help='select type of frame to copy from source rom\n')
-copy_group.add_argument('--source-rom', '-sr', metavar='FILE', help='path to source rom .gb file, required for copy mode\n')
-copy_group.add_argument('--source-frame', '-sf', metavar='[1-18]', choices=range(1,26), type=int, help='frame number from source rom, standard:[1-18] wild:[1-8] (Hello Kitty - standard:[1-25] wild:[1-6]), required for copy mode\n\n')
 
-global_group.add_argument('--target-rom', '-tr', required=True, metavar='FILE', help='path to target rom .gb file to be modified with changes\n')
-global_group.add_argument('--target-frame', '-tf', required=True, metavar='[1-18]', choices=range(1,19), type=int, help='frame number for target rom, standard:[1-18] wild:[1-8]')
+copy_group.add_argument('--frame-type', '-ft', choices=['standard', 'wild'], default='standard', help='select type of frame to copy from source rom\n')
+copy_group.add_argument('--source-rom', '-sr', metavar='FILE', help='path to source rom .gb file, required for copy or export mode\n')
+copy_group.add_argument('--source-frame', '-sf', metavar='[1-18]', choices=range(1,26), type=int, help='frame number from source rom, standard:[1-18] wild:[1-8] (Hello Kitty - standard:[1-25] wild:[1-6]), required for copy or export mode\n\n')
+
+export_group.add_argument('--export-mode', '-e', action='store_true', help='enables export mode to extract a frame from a rom to an image file\n')
+export_group.add_argument('--output-file', '-o', metavar='FILE', help='path to output file for export mode, required for export mode\n')
+
+global_group.add_argument('--target-rom', '-tr', metavar='FILE', help='path to target rom .gb file to be modified with changes\n')
+global_group.add_argument('--target-frame', '-tf', metavar='[1-18]', choices=range(1,19), type=int, help='frame number for target rom, standard:[1-18] wild:[1-8]')
 
 args = parser.parse_args()
 
@@ -105,6 +111,47 @@ def frame_copy(frameType, sourceRom, sourceFrame, targetRom, targetFrame, hkRom)
 	targetRomFile.close()
 
 	print("\nTarget rom modified, frame " + str(sourceFrame+1) + " copied from " + str(sourceRom) + " into " + str(frameType) + " frame slot " + str(targetFrame+1) + " on " + str(targetRom) + ".\n")
+
+def frame_export(frameType, sourceRom, sourceFrame, outputFile, hkRom):
+	if frameType == 'standard':
+		FRAME_LENGHT = STANDARD_FRAME_LENGTH
+		FRAME_OFFSET = STANDARD_FRAME_OFFSET
+	else:
+		FRAME_LENGHT = WILD_FRAME_LENGTH
+		FRAME_OFFSET = WILD_FRAME_OFFSET
+
+	sourceRomFile = open(sourceRom, "rb")
+
+	if hkRom != True:
+		# use consistent frame offset for rom other than hello kitty
+		if sourceFrame < 9:
+			sourceRomFile.seek(FRAME_OFFSET+FRAME_LENGHT*sourceFrame)
+		else:
+			sourceRomFile.seek(FRAME_OFFSET+BANK_SHIFT+FRAME_LENGHT*(sourceFrame-9))
+		frameData = sourceRomFile.read(FRAME_LENGHT)
+	else:
+		# for hello kitty rom, use the stored non standard offset for each frame and frame map
+		if frameType == 'standard':
+			sourceRomFile.seek(HELLO_KITTY_STANDARD_OFFSETS[sourceFrame][0])
+			frameData = sourceRomFile.read(STANDARD_FRAME_LENGTH)
+		else:
+			sourceRomFile.seek(HELLO_KITTY_WILD_OFFSETS[sourceFrame])
+			frameData = sourceRomFile.read(WILD_FRAME_LENGTH)
+	sourceRomFile.close()
+
+	tempFile = open("temp.2bpp", "wb")
+	tempFile.write(frameData)
+	tempFile.close()
+
+	if frameType == 'standard':
+		width = "20"
+		height = "18"
+	else:
+		width = "20"
+		height = "28"
+	subprocess.run(["./rgbgfx", "-w", "-h", "-o", outputFile, "-d", "2", "--width", width, "--height", height, "temp.2bpp"])
+	os.remove("temp.2bpp")
+	print("\n" + frameType + " frame " + str(sourceFrame+1) + " from " + str(sourceRom) + " exported to " + str(outputFile) + ".\n")
 
 def frame_inject(frameType, sourceImage, targetRom, targetFrame, convertBitmap):
 	# init tile and tile map
@@ -229,13 +276,14 @@ def main():
 	try:
 		global targetRomHK
 		global sourceRomHK
-		targetRomFile = open(args.target_rom, "rb")
-		targetRomFile.seek(ROM_TITLE_OFFSET)
-		targetRomTitle = targetRomFile.read(ROM_TITLE_LENGTH).decode("utf-8")
-		targetRomHK = False
-		if targetRomTitle == "POCKETCAMERA_SN":
-			targetRomHK = True
-		if args.copy_mode == "copy":
+		targetRomFile = open(args.target_rom, "rb") if args.target_rom is not None else None
+		if targetRomFile is not None:
+			targetRomFile.seek(ROM_TITLE_OFFSET)
+			targetRomTitle = targetRomFile.read(ROM_TITLE_LENGTH).decode("utf-8")
+			targetRomHK = False
+			if targetRomTitle == "POCKETCAMERA_SN":
+				targetRomHK = True
+		if args.copy_mode or args.export_mode:
 			sourceRomFile = open(args.source_rom, "rb")
 			sourceRomFile.seek(ROM_TITLE_OFFSET)
 			sourceRomTitle = sourceRomFile.read(ROM_TITLE_LENGTH).decode("utf-8")
@@ -255,6 +303,20 @@ def main():
 				raise Exception("This rom can only select frame number from range [1-25]")
 			else:
 				frame_copy(args.frame_type, args.source_rom, args.source_frame-1, args.target_rom, args.target_frame-1, sourceRomHK)
+		elif args.export_mode:
+			#validate export arguments
+			if args.output_file is None:
+				raise Exception("Output file is required for export mode")
+			if args.source_frame > 8 and args.frame_type == 'wild':
+				raise Exception("Max index for wild frames is 8")
+			elif args.source_frame > 6 and args.frame_type == 'wild' and sourceRomHK == True:
+				raise Exception("Max index for wild frames on this source rom is 6")
+			elif (sourceRomHK == False and args.source_frame > 18):
+				raise Exception("This rom can only select frame number from range [1-18]")
+			elif (sourceRomHK == True and args.source_frame > 25):
+				raise Exception("This rom can only select frame number from range [1-25]")
+			else:
+				frame_export(args.frame_type, args.source_rom, args.source_frame-1, args.output_file, sourceRomHK)
 		else:
 			#hk rom cannot be target
 			if targetRomHK == True:
@@ -294,7 +356,8 @@ def main():
 				frame_inject(frameType, args.source_image, args.target_rom, args.target_frame-1, convertBitmap)
 			else:
 				raise Exception("Source image can be .png, .bmp or already converted .bin (2bpp)\n")
-		expose_all_wild_frames(args.target_rom)
+		if args.target_rom is not None:
+			expose_all_wild_frames(args.target_rom)
 	except Exception as error:
 		print('\n'+str(error))
 	finally:

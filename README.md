@@ -12,11 +12,13 @@ python -m pip install --upgrade img2gb
 ```yaml
 usage: gbc-fr.py  [--source-image FILE]
                   [--copy-mode] [--frame-type {standard,wild}] [--source-rom FILE] [--source-frame [1-18]]
-                  --target-rom FILE --target-frame [1-18]
+                  [--export-mode] [--output-file FILE]
+                  [--target-rom FILE] [--target-frame [1-18]]
 
-Tool to modify frames in a Game Boy Camera rom. Inject mode is the default and can be used to  
-insert an image file (.png, .bmp) or tileset (.bin). An alternative copy mode can be enabled to  
-transfer frame data from one rom to another.
+Tool to modify frames in a Game Boy Camera rom. Inject mode is the default and can be used to
+insert an image file (.png, .bmp) or tileset (.bin). An alternative copy mode can be enabled to
+transfer frame data from one rom to another. A new export mode can extract a frame from a rom
+and save it as a PNG image.
 
 optional arguments:
   -h, --help #show this help message and exit
@@ -26,16 +28,20 @@ inject mode arguments:
 
 copy mode arguments:
   --copy-mode, -c      #enables copy mode to rip frames from another camera rom .gb file
-  --frame-type {standard,wild}, -ft {standard,wild} #select type of frame to copy from source rom, required for copy mode
-  --source-rom FILE, -sr FILE #path to source rom .gb file, required for copy mode
-  --source-frame [1-18], -sf [1-18] #frame number from source rom, standard:[1-18] wild:[1-8] (Hello Kitty - standard:[1-25] wild:[1-6]), required for copy mode
+  --frame-type {standard,wild}, -ft {standard,wild} #select type of frame to copy from source rom
+  --source-rom FILE, -sr FILE #path to source rom .gb file, required for copy or export mode
+  --source-frame [1-18], -sf [1-18] #frame number from source rom, standard:[1-18] wild:[1-8] (Hello Kitty - standard:[1-25] wild:[1-6]), required for copy or export mode
+
+export mode arguments:
+  --export-mode, -e      #enables export mode to extract a frame from a rom to an image file
+  --output-file FILE, -o FILE #path to output file for export mode, required for export mode
 
 required arguments:
   --target-rom FILE, -tr FILE #path to target rom .gb file to be modified with changes
   --target-frame [1-18], -tf [1-18] #frame number for target rom, standard:[1-18] wild:[1-8]
 ```
 
-Two modes are available inject or copy:
+Three modes are available inject, copy or export:
 
 **Inject** is the default mode and allows using a completely new image to replace an existing frame. You can specify the source image as a .png, .bmp and it will be converted to tile data or you can provide already formatted tile data as .bin. You will also specify the target rom and target frame.
 
@@ -49,6 +55,13 @@ python <b>./gbc-fr.py</b> <em>--source-image</em> <b>./cameraclub.png</b> <em>--
 **Example**: Copy wild frame 2 from JP Pocket Camera rom onto the international rom, replacing wild frame 4.  
 <pre>
 python <b>./gbc-fr.py</b> <em>--copy-mode</em> <em>--frame-type</em> <b>wild</b> <em>--source-rom</em> <b>./pocketcam-jp.gb</b> <em>--source-frame</em> <b>2</b> <em>--target-rom</em> <b>./gameboycam-intl.gb</b> <em>--target-frame</em> <b>4</b>
+</pre>
+
+**Export** mode extracts frame tile data from a source rom and saves it as a PNG image.
+
+**Example**: Export frame 5 from the Hello Kitty Pocket Camera rom to an image file.
+<pre>
+python <b>./gbc-fr.py</b> <em>--export-mode</em> <em>--source-rom</em> <b>./hellokitty-jp.gb</b> <em>--source-frame</em> <b>5</b> <em>--output-file</em> <b>hk-frame-5.png</b>
 </pre>
 
 ## Designing your frame image
